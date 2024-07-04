@@ -1,0 +1,4 @@
+*.so
+*.mp4
+compile_commands.json
+Makefile.local
