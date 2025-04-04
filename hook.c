@@ -99,8 +99,22 @@ kill_mpv(NotifyNotification *n, char *action, void *arg)
 	kill(mpv_master, SIGINT);
 }
 
+static const char*
+guess_url(int argc, char **argv)
+{
+	const char *uri = getenv("MPV_URI");
+	if (uri != NULL)
+		return uri;
+
+	for (int i = 1; i < argc; i++)
+		if (strncmp(argv[i], "https://", 8) == 0 || strncmp(argv[i], "http://", 7) == 0)
+			return argv[i];
+
+	return "<some_video>";
+}
+
 static void
-ntfy_main(pid_t mpv_master)
+ntfy_main(pid_t mpv_master, int argc, char **argv)
 {
 	NotifyNotification *n;
 	GMainLoop *l;
@@ -112,9 +126,7 @@ ntfy_main(pid_t mpv_master)
 	signal(SIGUSR1, on_sig);
 	prctl(PR_SET_PDEATHSIG, SIGUSR1);
 	
-	uri = getenv("MPV_URI");
-	if (uri == NULL)
-		uri = "<some video>";
+	uri = guess_url(argc, argv);
 	n = notify_notification_new("mpv", uri, NULL);
 	notify_notification_set_timeout(n, NOTIFY_EXPIRES_NEVER);
 	notify_notification_add_action(n, "kill", "Cancel", kill_mpv, NULL, NULL);
@@ -128,13 +140,13 @@ ntfy_main(pid_t mpv_master)
 	exit(EXIT_SUCCESS);
 }
 
-static void __attribute__((constructor)) init()
+static int init(int argc, char **argv, char **environ)
 {
 	clear_ld_preload();
 
 	HOOK_NF(pf_XCreateWindow);
 	if (fp_XCreateWindow == NULL)
-		return;	/* this will happen in child processes (yt-dlp) */
+		return 0;	/* this will happen in child processes (yt-dlp) */
 
 	/* To reap notify child */
 	signal(SIGUSR2, on_sig);
@@ -143,11 +155,15 @@ static void __attribute__((constructor)) init()
 	ntfy_child = fork();
 	switch (ntfy_child) {
 	case 0:
-		ntfy_main(mpv_master);
+		ntfy_main(mpv_master, argc, argv);
 		break;
 	case -1:
 		exit(EXIT_FAILURE);
 	default:
 		break;
 	}
+
+	return 0;
 }
+
+__attribute__((section(".init_array"))) void *ctor = &init;
